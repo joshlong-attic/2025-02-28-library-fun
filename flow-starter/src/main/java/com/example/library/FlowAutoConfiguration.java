@@ -10,14 +10,16 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.env.EnvironmentPostProcessor;
 import org.springframework.context.annotation.Bean;
+import org.springframework.core.env.CompositePropertySource;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.PropertiesPropertySource;
 import org.springframework.core.env.PropertySource;
 import org.springframework.core.io.ClassPathResource;
-import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 
+import java.util.HashSet;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -25,10 +27,15 @@ import java.util.concurrent.atomic.AtomicReference;
  * the application context! 
  * 
  * need to revisit this design..
+ *
+ * Maybe we could have it such that the {link  @Flow flow} annotation in turn also has a meta annotation
+ * allowing us to do a ImportRegistrar thing, like @EnableFoo or @EnableBar? 
+ * that'd give us a pointer to the current flow class' annotation, not <em>all</em>
+ * of them
  */
 
 @AutoConfiguration
-class LibraryAutoConfiguration {
+class FlowAutoConfiguration {
 
     private static final AtomicReference<BeanFactory> BEAN_FACTORY_ATOMIC_REFERENCE = new AtomicReference<>();
 
@@ -42,7 +49,10 @@ class LibraryAutoConfiguration {
         return new LibraryBeanFactoryInitializationAotProcessor();
     }
 
-    
+    /**
+     * this is registered in META-INF/spring.factories
+     */
+    @SuppressWarnings("unused")
     static class FlowEnvironmentPostProcessor implements EnvironmentPostProcessor {
 
         @Override
@@ -52,7 +62,7 @@ class LibraryAutoConfiguration {
 
         private static class FlowPropertySource extends PropertySource<String> {
 
-            private final AtomicReference<PropertySource<?>> delegate = new AtomicReference<>();
+            private final AtomicReference<CompositePropertySource> delegate = new AtomicReference<>();
 
             FlowPropertySource() {
                 super("library");
@@ -61,36 +71,33 @@ class LibraryAutoConfiguration {
             @Override
             public Object getProperty(String name) {
                 var beanFactoryIsNotNull = BEAN_FACTORY_ATOMIC_REFERENCE.get() != null;
-                var butIsntInitialized = delegate.get() == null;
-                if (beanFactoryIsNotNull && butIsntInitialized) {
-                    this.doInitialization();
+                var butDelegateIsntInitializedYet = delegate.get() == null;
+                if (beanFactoryIsNotNull && butDelegateIsntInitializedYet) {
+                    this.initializeLazily();
                 }
-                
                 return delegate.get() != null ? delegate.get().getProperty(name) : null;
             }
 
-            private void doInitialization() {
-                var plugin = findFlowPluginName((ConfigurableListableBeanFactory) BEAN_FACTORY_ATOMIC_REFERENCE.get());
-                Assert.hasText(plugin, "No flow plugin name found!");
-                var properties = new Properties();
-                var pluginPropertyFile = plugin + ".properties";
-                var resource = new ClassPathResource(pluginPropertyFile);
-                try (var resourceInputStream = resource.getInputStream()) {
-                    properties.load(resourceInputStream);
-                    properties.setProperty("flow.plugin.name", plugin);
-                    var propertiesPropertySource = new PropertiesPropertySource(plugin, properties);
-                    delegate.set(propertiesPropertySource);
-                }//  
-                catch (Exception e) {
-                    throw new IllegalStateException("couldn't load properties from " +
-                            pluginPropertyFile, e);
+            private void initializeLazily() {
+                var plugins = findFlowPluginNames((ConfigurableListableBeanFactory) BEAN_FACTORY_ATOMIC_REFERENCE.get());
+                delegate.set(new CompositePropertySource("flow"));
+                for (var plugin : plugins) {
+                    var properties = new Properties();
+                    var pluginPropertyFile = plugin + ".properties";
+                    var resource = new ClassPathResource(pluginPropertyFile);
+                    try (var resourceInputStream = resource.getInputStream()) {
+                        properties.load(resourceInputStream);
+                        properties.setProperty("flow.plugin.name", plugin);
+                        var propertiesPropertySource = new PropertiesPropertySource(plugin, properties);
+                        delegate.get().addPropertySource(propertiesPropertySource);
+                    }//  
+                    catch (Exception e) {
+                        throw new IllegalStateException("couldn't load properties from " +
+                                pluginPropertyFile, e);
+                    }
                 }
             }
-
-
         }
-
-
     }
 
     /**
@@ -112,13 +119,12 @@ class LibraryAutoConfiguration {
         public BeanFactoryInitializationAotContribution processAheadOfTime(ConfigurableListableBeanFactory beanFactory) {
             return (generationContext, beanFactoryInitializationCode) -> {
                 var runtimeHints = generationContext.getRuntimeHints();
-                var flowName = findFlowPluginName(beanFactory);
-                if (StringUtils.hasText(flowName)) {
-                    var propertyFile = flowName + ".properties";
-                    runtimeHints.resources().registerPattern(propertyFile);
-                    System.out.println("registering flow properties for " + propertyFile + ".");
-                } else {
-                    System.out.println("no flow name found!!");
+                var flowNames = findFlowPluginNames(beanFactory);
+                for (var flowName : flowNames) {
+                    if (StringUtils.hasText(flowName)) {
+                        var propertyFile = flowNames + ".properties";
+                        runtimeHints.resources().registerPattern(propertyFile);
+                    } 
                 }
             };
         }
@@ -130,17 +136,18 @@ class LibraryAutoConfiguration {
      * @param beanFactory bean factory
      * @return the name of the plugin 
      */
-    private static String findFlowPluginName(ConfigurableListableBeanFactory beanFactory) {
+    private static Set<String> findFlowPluginNames(ConfigurableListableBeanFactory beanFactory) {
+        var pluginNames = new HashSet<String>();
         var beanDefinitionNames = beanFactory.getBeanNamesForAnnotation(Flow.class);
         for (var beanDefinitionName : beanDefinitionNames) {
             var clzz = beanFactory.getType(beanDefinitionName);
             if (null != clzz) {
                 var superclass = clzz.getSuperclass();
                 var flow = superclass.getAnnotation(Flow.class);
-                return flow.flowName();
+                pluginNames.add(flow.flowName());
             }
         }
-        return null;
+        return pluginNames;
     }
 
 }
