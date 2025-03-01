@@ -9,9 +9,9 @@
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>com.example</groupId>
-    <artifactId>service</artifactId>
+    <artifactId>flow-service</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>service</name>
+    <name>flow-service</name>
     <description>Demo project for Spring Boot</description>
     <url/>
     <licenses>
@@ -37,7 +37,7 @@
 
         <dependency>
             <groupId>com.example</groupId>
-            <artifactId>library</artifactId>
+            <artifactId>flow-starter</artifactId>
             <version>0.0.1-SNAPSHOT</version>
         </dependency>
         <dependency>

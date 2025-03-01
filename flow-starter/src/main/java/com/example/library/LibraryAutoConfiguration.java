@@ -20,11 +20,29 @@ import org.springframework.util.StringUtils;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicReference;
 
+/**
+ * WARNING!! this code works if and only if there is one and only one class with {@link  Flow} in 
+ * the application context! 
+ * 
+ * need to revisit this design..
+ */
 
 @AutoConfiguration
 class LibraryAutoConfiguration {
 
+    private static final AtomicReference<BeanFactory> BEAN_FACTORY_ATOMIC_REFERENCE = new AtomicReference<>();
 
+    @Bean
+    static LibraryBeanFactoryPostProcessor libraryBeanFactoryPostProcessor() {
+        return new LibraryBeanFactoryPostProcessor();
+    }
+
+    @Bean
+    static LibraryBeanFactoryInitializationAotProcessor myBeanFactoryAotInitializationProcessor() {
+        return new LibraryBeanFactoryInitializationAotProcessor();
+    }
+
+    
     static class FlowEnvironmentPostProcessor implements EnvironmentPostProcessor {
 
         @Override
@@ -47,6 +65,7 @@ class LibraryAutoConfiguration {
                 if (beanFactoryIsNotNull && butIsntInitialized) {
                     this.doInitialization();
                 }
+                
                 return delegate.get() != null ? delegate.get().getProperty(name) : null;
             }
 
@@ -58,6 +77,7 @@ class LibraryAutoConfiguration {
                 var resource = new ClassPathResource(pluginPropertyFile);
                 try (var resourceInputStream = resource.getInputStream()) {
                     properties.load(resourceInputStream);
+                    properties.setProperty("flow.plugin.name", plugin);
                     var propertiesPropertySource = new PropertiesPropertySource(plugin, properties);
                     delegate.set(propertiesPropertySource);
                 }//  
@@ -73,50 +93,20 @@ class LibraryAutoConfiguration {
 
     }
 
-    
- /*   @Bean
-    InitializingBean lateBoundPropertySourceModifyingThingy(
-            ConfigurableListableBeanFactory beanFactory,
-            Environment environment) {
-        return () -> {
-            var pluginName = findFlowPluginName(beanFactory);
-            Assert.hasText(pluginName, "there must be a plugin name specified somewhere.");
-            if (environment instanceof ConfigurableEnvironment configurableEnvironment) {
-                var properties = new Properties();
-                try (var inp = new ClassPathResource("" + pluginName + ".properties").getInputStream()) {
-                    properties.load(inp);
-                    System.out.println(properties);
-                }
-                configurableEnvironment.getPropertySources().addFirst(new PropertiesPropertySource(pluginName + "", properties));
-            }
-
-        };
-    }
-*/
-
-    @Bean
-    static LibraryBeanFactoryPostProcessor libraryBeanFactoryPostProcessor() {
-        return new LibraryBeanFactoryPostProcessor();
-    }
-
-    private static final AtomicReference<BeanFactory> BEAN_FACTORY_ATOMIC_REFERENCE =
-            new AtomicReference<>();
-
+    /**
+     * this exists only to capture a pointer to the 
+     * {@link BeanFactory beanfactory} as early as possible.
+     */
     static class LibraryBeanFactoryPostProcessor implements BeanFactoryPostProcessor {
 
         @Override
         public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) throws BeansException {
-            System.out.println("setting up the bean factory");
             BEAN_FACTORY_ATOMIC_REFERENCE.set(beanFactory);
         }
     }
-    
-    @Bean
-    static MyBeanFactoryAotInitializationProcessor myBeanFactoryAotInitializationProcessor() {
-        return new MyBeanFactoryAotInitializationProcessor();
-    }
+   
 
-    static class MyBeanFactoryAotInitializationProcessor implements BeanFactoryInitializationAotProcessor {
+    static class LibraryBeanFactoryInitializationAotProcessor implements BeanFactoryInitializationAotProcessor {
 
         @Override
         public BeanFactoryInitializationAotContribution processAheadOfTime(ConfigurableListableBeanFactory beanFactory) {
@@ -134,6 +124,12 @@ class LibraryAutoConfiguration {
         }
     }
 
+    /**
+     * sift through all the beans in the application context and find those annotated with {@link Flow @Flow} 
+     * and then extract its flow name.
+     * @param beanFactory bean factory
+     * @return the name of the plugin 
+     */
     private static String findFlowPluginName(ConfigurableListableBeanFactory beanFactory) {
         var beanDefinitionNames = beanFactory.getBeanNamesForAnnotation(Flow.class);
         for (var beanDefinitionName : beanDefinitionNames) {
