@@ -8,15 +8,18 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
 
 
+// this and github.properties would get in the auto configuration of the flow definition for a customer 
 @Flow(flowName = "github")
 class MyFlowConfig {
 }
 
+
+// this represents the flow service itself 
 @SpringBootApplication
 public class ServiceApplication {
 
     @Bean
-    ApplicationRunner messageRunner(@Value("${message:oof}") String message) {
+    ApplicationRunner messageRunner(@Value("${message}") String message) {
         return args -> System.out.println("message is [" + message + ']');
     }
 

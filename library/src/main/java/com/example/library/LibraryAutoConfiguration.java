@@ -1,69 +1,119 @@
 package com.example.library;
 
+import org.springframework.beans.BeansException;
+import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.aot.BeanFactoryInitializationAotContribution;
 import org.springframework.beans.factory.aot.BeanFactoryInitializationAotProcessor;
+import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
-import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.env.EnvironmentPostProcessor;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.ConfigurableEnvironment;
-import org.springframework.core.env.Environment;
 import org.springframework.core.env.PropertiesPropertySource;
+import org.springframework.core.env.PropertySource;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 
 import java.util.Properties;
-
-// todo in the starter for customers to use in their flow library contributions,
-// use convention to automatically load the property file from the classpath given the flowName 
+import java.util.concurrent.atomic.AtomicReference;
 
 
-/*
- * there are two concerns in this class:
- *
- * 1.) we want to register a property source dynamically based on the name of the plugin
- * 2.) we want to tell graalvm about the property file, again, dynamically, based on the name of the plugin
- * */
-
-
-@Configuration
-//@EnableConfigurationProperties(ConfigurationProperties.class)
+@AutoConfiguration
 class LibraryAutoConfiguration {
 
 
-    @Bean
-    ApplicationRunner lateBoundPropertySourceModifyingThingy(
+    static class FlowEnvironmentPostProcessor implements EnvironmentPostProcessor {
+
+        @Override
+        public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
+            environment.getPropertySources().addFirst(new FlowPropertySource());
+        }
+
+        private static class FlowPropertySource extends PropertySource<String> {
+
+            private final AtomicReference<PropertySource<?>> delegate = new AtomicReference<>();
+
+            FlowPropertySource() {
+                super("library");
+            }
+
+            @Override
+            public Object getProperty(String name) {
+                var beanFactoryIsNotNull = BEAN_FACTORY_ATOMIC_REFERENCE.get() != null;
+                var butIsntInitialized = delegate.get() == null;
+                if (beanFactoryIsNotNull && butIsntInitialized) {
+                    this.doInitialization();
+                }
+                return delegate.get() != null ? delegate.get().getProperty(name) : null;
+            }
+
+            private void doInitialization() {
+                var plugin = findFlowPluginName((ConfigurableListableBeanFactory) BEAN_FACTORY_ATOMIC_REFERENCE.get());
+                Assert.hasText(plugin, "No flow plugin name found!");
+                var properties = new Properties();
+                var pluginPropertyFile = plugin + ".properties";
+                var resource = new ClassPathResource(pluginPropertyFile);
+                try (var resourceInputStream = resource.getInputStream()) {
+                    properties.load(resourceInputStream);
+                    var propertiesPropertySource = new PropertiesPropertySource(plugin, properties);
+                    delegate.set(propertiesPropertySource);
+                }//  
+                catch (Exception e) {
+                    throw new IllegalStateException("couldn't load properties from " +
+                            pluginPropertyFile, e);
+                }
+            }
+
+
+        }
+
+
+    }
+
+    
+ /*   @Bean
+    InitializingBean lateBoundPropertySourceModifyingThingy(
             ConfigurableListableBeanFactory beanFactory,
             Environment environment) {
-        return args -> {
+        return () -> {
             var pluginName = findFlowPluginName(beanFactory);
-            System.out.println("plugin name is " + pluginName);
+            Assert.hasText(pluginName, "there must be a plugin name specified somewhere.");
             if (environment instanceof ConfigurableEnvironment configurableEnvironment) {
                 var properties = new Properties();
                 try (var inp = new ClassPathResource("" + pluginName + ".properties").getInputStream()) {
                     properties.load(inp);
+                    System.out.println(properties);
                 }
                 configurableEnvironment.getPropertySources().addFirst(new PropertiesPropertySource(pluginName + "", properties));
             }
 
         };
     }
+*/
 
+    @Bean
+    static LibraryBeanFactoryPostProcessor libraryBeanFactoryPostProcessor() {
+        return new LibraryBeanFactoryPostProcessor();
+    }
+
+    private static final AtomicReference<BeanFactory> BEAN_FACTORY_ATOMIC_REFERENCE =
+            new AtomicReference<>();
+
+    static class LibraryBeanFactoryPostProcessor implements BeanFactoryPostProcessor {
+
+        @Override
+        public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) throws BeansException {
+            System.out.println("setting up the bean factory");
+            BEAN_FACTORY_ATOMIC_REFERENCE.set(beanFactory);
+        }
+    }
+    
     @Bean
     static MyBeanFactoryAotInitializationProcessor myBeanFactoryAotInitializationProcessor() {
         return new MyBeanFactoryAotInitializationProcessor();
-    }
-
-
-    private static String findFlowPluginName(ConfigurableListableBeanFactory beanFactory) {
-        var beanDefinitionNames = beanFactory.getBeanNamesForAnnotation(Flow.class);
-        for (var beanDefinitionName : beanDefinitionNames) {
-            var clzz = beanFactory.getType(beanDefinitionName);
-            var superclass = clzz.getSuperclass();
-            var flow = superclass.getAnnotation(Flow.class);
-            return flow.flowName();
-        }
-        return null;
     }
 
     static class MyBeanFactoryAotInitializationProcessor implements BeanFactoryInitializationAotProcessor {
@@ -84,16 +134,19 @@ class LibraryAutoConfiguration {
         }
     }
 
-//
-//    @Bean
-//    ApplicationRunner applicationRunner(ConfigurationProperties properties) {
-//        return args ->
-//                System.out.println("this is a flow for the plugin called " + properties.flowName());
-//    }
+    private static String findFlowPluginName(ConfigurableListableBeanFactory beanFactory) {
+        var beanDefinitionNames = beanFactory.getBeanNamesForAnnotation(Flow.class);
+        for (var beanDefinitionName : beanDefinitionNames) {
+            var clzz = beanFactory.getType(beanDefinitionName);
+            if (null != clzz) {
+                var superclass = clzz.getSuperclass();
+                var flow = superclass.getAnnotation(Flow.class);
+                return flow.flowName();
+            }
+        }
+        return null;
+    }
+
 }
 
-
-/*
-@org.springframework.boot.context.properties.ConfigurationProperties(prefix = "something")
-record ConfigurationProperties(String flowName) {
-}*/
+ 
