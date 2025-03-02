@@ -22,18 +22,6 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
-/**
- * WARNING!! this code works if and only if there is one and only one class with {@link  Flow} in
- * the application context!
- * <p>
- * need to revisit this design..
- * <p>
- * Maybe we could have it such that the {link  @Flow flow} annotation in turn also has a meta annotation
- * allowing us to do a ImportRegistrar thing, like @EnableFoo or @EnableBar?
- * that'd give us a pointer to the current flow class' annotation, not <em>all</em>
- * of them
- */
-
 @AutoConfiguration
 class FlowAutoConfiguration {
 
@@ -77,7 +65,8 @@ class FlowAutoConfiguration {
             }
 
             private void initializeLazily() {
-                var plugins = findFlowPluginNames((ConfigurableListableBeanFactory) BEAN_FACTORY_ATOMIC_REFERENCE.get());
+                var plugins = findFlowPluginNames(
+                        (ConfigurableListableBeanFactory) BEAN_FACTORY_ATOMIC_REFERENCE.get());
                 delegate.set(new CompositePropertySource("flow"));
                 for (var plugin : plugins) {
                     var properties = new Properties();
@@ -85,23 +74,17 @@ class FlowAutoConfiguration {
                     var resource = new ClassPathResource(pluginPropertyFile);
                     try (var resourceInputStream = resource.getInputStream()) {
                         properties.load(resourceInputStream);
-
-                        // this way, plugins can inject and use their own name elsewhere in the code.
-                        properties.setProperty("flow.plugin.name", plugin);
-
-                        var propertiesPropertySource = new PropertiesPropertySource(plugin, properties);
-
-                        delegate.get().addPropertySource(propertiesPropertySource);
-                    }//  
+                        delegate.get().addPropertySource(new PropertiesPropertySource(plugin, properties));
+                    } //
                     catch (Exception e) {
-                        throw new IllegalStateException("couldn't load properties from " +
-                                pluginPropertyFile, e);
+                        throw new IllegalStateException("couldn't load properties from " + pluginPropertyFile, e);
                     }
                 }
             }
-        }
-    }
 
+        }
+
+    }
 
     // this exists only to capture a pointer to the BeanFactory as early as possible
     static class LibraryBeanFactoryPostProcessor implements BeanFactoryPostProcessor {
@@ -110,13 +93,14 @@ class FlowAutoConfiguration {
         public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) throws BeansException {
             BEAN_FACTORY_ATOMIC_REFERENCE.set(beanFactory);
         }
-    }
 
+    }
 
     static class LibraryBeanFactoryInitializationAotProcessor implements BeanFactoryInitializationAotProcessor {
 
         @Override
-        public BeanFactoryInitializationAotContribution processAheadOfTime(ConfigurableListableBeanFactory beanFactory) {
+        public BeanFactoryInitializationAotContribution processAheadOfTime(
+                ConfigurableListableBeanFactory beanFactory) {
             return (generationContext, beanFactoryInitializationCode) -> {
                 var runtimeHints = generationContext.getRuntimeHints();
                 var flowNames = findFlowPluginNames(beanFactory);
@@ -129,10 +113,13 @@ class FlowAutoConfiguration {
                 }
             };
         }
+
     }
 
     /**
-     * sift through all the beans in the {@link ConfigurableListableBeanFactory beanFactory} and find those annotated with {@link Flow @Flow} and then extract from it the flow name.
+     * sift through all the beans in the {@link ConfigurableListableBeanFactory
+     * beanFactory} and find those annotated with {@link Flow @Flow} and then extract from
+     * it the flow name.
      */
     private static Set<String> findFlowPluginNames(ConfigurableListableBeanFactory beanFactory) {
         var pluginNames = new HashSet<String>();
@@ -149,5 +136,3 @@ class FlowAutoConfiguration {
     }
 
 }
-
- 

@@ -6,17 +6,16 @@ import org.springframework.stereotype.Component;
 
 import java.lang.annotation.*;
 
-@Target({ElementType.TYPE})
+@Target({ ElementType.TYPE })
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
 @Configuration
 public @interface Flow {
 
-    /* required */
-    String flowName();
+	/* required */
+	String flowName();
 
-    @AliasFor(
-            annotation = Component.class
-    )
-    String value() default "";
+	@AliasFor(annotation = Component.class)
+	String value() default "";
+
 }
