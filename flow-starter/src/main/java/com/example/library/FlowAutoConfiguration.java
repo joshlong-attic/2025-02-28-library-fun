@@ -23,13 +23,13 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * WARNING!! this code works if and only if there is one and only one class with {@link  Flow} in 
- * the application context! 
- * 
+ * WARNING!! this code works if and only if there is one and only one class with {@link  Flow} in
+ * the application context!
+ * <p>
  * need to revisit this design..
- *
+ * <p>
  * Maybe we could have it such that the {link  @Flow flow} annotation in turn also has a meta annotation
- * allowing us to do a ImportRegistrar thing, like @EnableFoo or @EnableBar? 
+ * allowing us to do a ImportRegistrar thing, like @EnableFoo or @EnableBar?
  * that'd give us a pointer to the current flow class' annotation, not <em>all</em>
  * of them
  */
@@ -45,37 +45,35 @@ class FlowAutoConfiguration {
     }
 
     @Bean
-    static LibraryBeanFactoryInitializationAotProcessor myBeanFactoryAotInitializationProcessor() {
+    static LibraryBeanFactoryInitializationAotProcessor libraryBeanFactoryInitializationAotProcessor() {
         return new LibraryBeanFactoryInitializationAotProcessor();
     }
 
-    /**
-     * this is registered in META-INF/spring.factories
-     */
+    // this is registered in META-INF/spring.factories
     @SuppressWarnings("unused")
-    static class FlowEnvironmentPostProcessor implements EnvironmentPostProcessor {
+    static class LibraryEnvironmentPostProcessor implements EnvironmentPostProcessor {
 
         @Override
         public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
-            environment.getPropertySources().addFirst(new FlowPropertySource());
+            environment.getPropertySources().addFirst(new LibraryPropertySource());
         }
 
-        private static class FlowPropertySource extends PropertySource<String> {
+        private static class LibraryPropertySource extends PropertySource<String> {
 
             private final AtomicReference<CompositePropertySource> delegate = new AtomicReference<>();
 
-            FlowPropertySource() {
+            LibraryPropertySource() {
                 super("library");
             }
 
             @Override
             public Object getProperty(String name) {
                 var beanFactoryIsNotNull = BEAN_FACTORY_ATOMIC_REFERENCE.get() != null;
-                var butDelegateIsntInitializedYet = delegate.get() == null;
+                var butDelegateIsntInitializedYet = this.delegate.get() == null;
                 if (beanFactoryIsNotNull && butDelegateIsntInitializedYet) {
                     this.initializeLazily();
                 }
-                return delegate.get() != null ? delegate.get().getProperty(name) : null;
+                return this.delegate.get() == null ? null : this.delegate.get().getProperty(name);
             }
 
             private void initializeLazily() {
@@ -87,8 +85,12 @@ class FlowAutoConfiguration {
                     var resource = new ClassPathResource(pluginPropertyFile);
                     try (var resourceInputStream = resource.getInputStream()) {
                         properties.load(resourceInputStream);
+
+                        // this way, plugins can inject and use their own name elsewhere in the code.
                         properties.setProperty("flow.plugin.name", plugin);
+
                         var propertiesPropertySource = new PropertiesPropertySource(plugin, properties);
+
                         delegate.get().addPropertySource(propertiesPropertySource);
                     }//  
                     catch (Exception e) {
@@ -100,10 +102,8 @@ class FlowAutoConfiguration {
         }
     }
 
-    /**
-     * this exists only to capture a pointer to the 
-     * {@link BeanFactory beanfactory} as early as possible.
-     */
+
+    // this exists only to capture a pointer to the BeanFactory as early as possible
     static class LibraryBeanFactoryPostProcessor implements BeanFactoryPostProcessor {
 
         @Override
@@ -111,7 +111,7 @@ class FlowAutoConfiguration {
             BEAN_FACTORY_ATOMIC_REFERENCE.set(beanFactory);
         }
     }
-   
+
 
     static class LibraryBeanFactoryInitializationAotProcessor implements BeanFactoryInitializationAotProcessor {
 
@@ -122,19 +122,17 @@ class FlowAutoConfiguration {
                 var flowNames = findFlowPluginNames(beanFactory);
                 for (var flowName : flowNames) {
                     if (StringUtils.hasText(flowName)) {
-                        var propertyFile = flowNames + ".properties";
+                        var propertyFile = flowName + ".properties";
+                        System.out.println("registering " + propertyFile);
                         runtimeHints.resources().registerPattern(propertyFile);
-                    } 
+                    }
                 }
             };
         }
     }
 
     /**
-     * sift through all the beans in the application context and find those annotated with {@link Flow @Flow} 
-     * and then extract its flow name.
-     * @param beanFactory bean factory
-     * @return the name of the plugin 
+     * sift through all the beans in the {@link ConfigurableListableBeanFactory beanFactory} and find those annotated with {@link Flow @Flow} and then extract from it the flow name.
      */
     private static Set<String> findFlowPluginNames(ConfigurableListableBeanFactory beanFactory) {
         var pluginNames = new HashSet<String>();

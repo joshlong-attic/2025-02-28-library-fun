@@ -14,7 +14,7 @@ class MyFlowConfig {
             @Value("${message}") String message,
             @Value("${flow.plugin.name}") String pluginName) {
         return _ ->
-                System.out.println("message defined for the plugin [" + pluginName + "]" + " is [" + message + ']');
+                System.out.println("message defined in the plugin [" + pluginName + "]" + " is [" + message + ']');
     }
 
 }
